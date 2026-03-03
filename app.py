@@ -5,32 +5,36 @@ import random
 st.set_page_config(page_title="RL Shopping Assistant", layout="centered")
 
 # -----------------------------
-# STATES & ACTIONS
+# PLATFORM ACTIONS
 # -----------------------------
 
-states = ["Shoes", "Electronics", "Clothing"]
-actions = ["Amazon", "Flipkart", "AJIO", "Cheaper Alternative"]
+platforms = ["Amazon", "Flipkart", "AJIO"]
 
-# Simulated product data
-product_data = {
-    "Shoes": {
+# -----------------------------
+# SIMULATED MARKETPLACE DATA
+# -----------------------------
+
+marketplace = {
+    "tshirt": {
+        "Amazon": {"price": 799, "rating": 4.2},
+        "Flipkart": {"price": 749, "rating": 4.0},
+        "AJIO": {"price": 699, "rating": 4.3},
+    },
+    "shoes": {
         "Amazon": {"price": 2499, "rating": 4.3},
         "Flipkart": {"price": 2399, "rating": 4.1},
         "AJIO": {"price": 2599, "rating": 4.4},
-        "Cheaper Alternative": {"price": 1999, "rating": 3.9},
     },
-    "Electronics": {
+    "watch": {
+        "Amazon": {"price": 1999, "rating": 4.4},
+        "Flipkart": {"price": 1899, "rating": 4.1},
+        "AJIO": {"price": 2099, "rating": 4.2},
+    },
+    "electronics": {
         "Amazon": {"price": 18999, "rating": 4.5},
         "Flipkart": {"price": 18499, "rating": 4.2},
-        "AJIO": {"price": 0, "rating": 0},
-        "Cheaper Alternative": {"price": 15999, "rating": 3.8},
-    },
-    "Clothing": {
-        "Amazon": {"price": 1499, "rating": 4.0},
-        "Flipkart": {"price": 1399, "rating": 4.1},
-        "AJIO": {"price": 1299, "rating": 4.3},
-        "Cheaper Alternative": {"price": 999, "rating": 3.7},
-    },
+        "AJIO": None
+    }
 }
 
 # -----------------------------
@@ -38,125 +42,147 @@ product_data = {
 # -----------------------------
 
 if "q_table" not in st.session_state:
-    st.session_state.q_table = np.zeros((len(states), len(actions)))
+    st.session_state.q_table = {}
 
 if "epsilon" not in st.session_state:
     st.session_state.epsilon = 1.0
 
-if "current_state" not in st.session_state:
-    st.session_state.current_state = None
+if "suggested_platform" not in st.session_state:
+    st.session_state.suggested_platform = None
 
-if "action_index" not in st.session_state:
-    st.session_state.action_index = None
-
-# -----------------------------
-# Q LEARNING UPDATE
-# -----------------------------
-
-def update_q(reward):
-
-    s = st.session_state.current_state
-    a = st.session_state.action_index
-
-    lr = 0.1
-    gamma = 0.9
-
-    old_value = st.session_state.q_table[s, a]
-    next_max = np.max(st.session_state.q_table[s])
-
-    new_value = old_value + lr * (reward + gamma * next_max - old_value)
-    st.session_state.q_table[s, a] = new_value
-
-    # Decay epsilon
-    if st.session_state.epsilon > 0.05:
-        st.session_state.epsilon *= 0.97
-
+if "current_product" not in st.session_state:
+    st.session_state.current_product = None
 
 # -----------------------------
-# UI
+# RL PARAMETERS
+# -----------------------------
+
+learning_rate = 0.1
+discount_factor = 0.9
+epsilon_decay = 0.95
+min_epsilon = 0.05
+
+# -----------------------------
+# INITIALIZE PRODUCT STATE
+# -----------------------------
+
+def initialize_product(product):
+    if product not in st.session_state.q_table:
+        st.session_state.q_table[product] = np.zeros(len(platforms))
+
+# -----------------------------
+# RECOMMENDATION FUNCTION
+# -----------------------------
+
+def recommend(product):
+
+    initialize_product(product)
+
+    available = marketplace[product]
+    valid_platforms = [p for p in platforms if available.get(p) is not None]
+
+    if random.uniform(0, 1) < st.session_state.epsilon:
+        chosen = random.choice(valid_platforms)
+        st.write("🔎 Exploring...")
+    else:
+        best_index = np.argmax(st.session_state.q_table[product])
+        chosen = platforms[best_index]
+        st.write("🎯 Exploiting learned preference...")
+
+    st.session_state.suggested_platform = chosen
+    return chosen
+
+# -----------------------------
+# UPDATE Q FUNCTION
+# -----------------------------
+
+def update_q(product, suggested, reward):
+
+    index = platforms.index(suggested)
+
+    old_value = st.session_state.q_table[product][index]
+    next_max = np.max(st.session_state.q_table[product])
+
+    new_value = old_value + learning_rate * (
+        reward + discount_factor * next_max - old_value
+    )
+
+    st.session_state.q_table[product][index] = new_value
+
+    if st.session_state.epsilon > min_epsilon:
+        st.session_state.epsilon *= epsilon_decay
+
+
+# -----------------------------
+# UI START
 # -----------------------------
 
 st.title("🛒 RL Smart Shopping Assistant")
-st.caption("Learns which platform you prefer for different product categories")
+st.caption("Learns which platform you prefer for each product")
 
-st.subheader("Select Product Category")
+product = st.text_input("Enter product (tshirt / shoes / watch / electronics):")
 
-col1, col2, col3 = st.columns(3)
+if product:
+    product = product.lower()
 
-if col1.button("👟 Shoes"):
-    st.session_state.current_state = 0
-
-if col2.button("📱 Electronics"):
-    st.session_state.current_state = 1
-
-if col3.button("👕 Clothing"):
-    st.session_state.current_state = 2
-
-
-# -----------------------------
-# RECOMMENDATION ENGINE
-# -----------------------------
-
-if st.session_state.current_state is not None:
-
-    state_index = st.session_state.current_state
-    category = states[state_index]
-
-    # Epsilon-greedy
-    if random.uniform(0, 1) < st.session_state.epsilon:
-        action_index = random.randint(0, len(actions) - 1)
+    if product not in marketplace:
+        st.error("Product not available in demo dataset.")
     else:
-        action_index = np.argmax(st.session_state.q_table[state_index])
+        st.session_state.current_product = product
 
-    st.session_state.action_index = action_index
-    chosen_action = actions[action_index]
+        st.markdown("### 🏷 Available Platforms")
 
-    st.markdown("### 🔍 Suggested Platform")
+        for platform, details in marketplace[product].items():
+            if details:
+                st.write(f"**{platform}** - ₹{details['price']} | {details['rating']}⭐")
+            else:
+                st.write(f"**{platform}** - Not Available")
 
-    details = product_data[category][chosen_action]
-
-    if details["price"] == 0:
-        st.warning(f"{chosen_action} does not list this category.")
-    else:
-        st.info(
-            f"Platform: {chosen_action}\n\n"
-            f"Price: ₹{details['price']}\n\n"
-            f"Rating: {details['rating']} ⭐"
-        )
-
-    # -----------------------------
-    # FEEDBACK
-    # -----------------------------
-
-    st.markdown("### 🧠 Your Action")
-
-    col1, col2 = st.columns(2)
-
-    if col1.button("🛍 Clicked / Purchased"):
-        update_q(15)
-        st.success("Model learned you liked this platform!")
-
-    if col2.button("❌ Ignored"):
-        update_q(-5)
-        st.error("Model learned this was not preferred.")
-
+        if st.button("🔍 Get Smart Suggestion"):
+            suggestion = recommend(product)
+            st.success(f"Suggested Platform: {suggestion}")
 
 # -----------------------------
-# RESET
+# USER CHOICE
+# -----------------------------
+
+if st.session_state.suggested_platform:
+
+    choice = st.selectbox(
+        "Where do you want to buy from?",
+        [p for p in platforms if marketplace[st.session_state.current_product].get(p) is not None]
+    )
+
+    if st.button("Confirm Choice"):
+
+        if choice == st.session_state.suggested_platform:
+            reward = 20
+            st.success("You accepted suggestion! Positive reward.")
+        else:
+            reward = -5
+            st.warning("You ignored suggestion. Negative reward.")
+
+        update_q(st.session_state.current_product,
+                 st.session_state.suggested_platform,
+                 reward)
+
+        st.session_state.suggested_platform = None
+
+# -----------------------------
+# RESET BUTTON
 # -----------------------------
 
 st.markdown("---")
 
 if st.button("🔄 Reset Learning"):
-    st.session_state.q_table = np.zeros((len(states), len(actions)))
+    st.session_state.q_table = {}
     st.session_state.epsilon = 1.0
     st.success("Model Reset!")
-
 
 # -----------------------------
 # DEBUG PANEL
 # -----------------------------
 
 with st.expander("📊 View Q-Table"):
-    st.dataframe(st.session_state.q_table)
+    st.write(st.session_state.q_table)
     st.write("Epsilon:", round(st.session_state.epsilon, 3))
