@@ -43,7 +43,7 @@ marketplace = {
 # -------------------------------
 learning_rate = 0.1
 discount_factor = 0.9
-epsilon = 0.2  # exploration rate
+epsilon = 0.2
 
 # -------------------------------
 # SESSION STATE INIT
@@ -54,6 +54,9 @@ if "q_table" not in st.session_state:
 if "user_pref" not in st.session_state:
     st.session_state.user_pref = {p: 0 for p in platforms}
 
+if "reward_history" not in st.session_state:
+    st.session_state.reward_history = []
+
 # -------------------------------
 # INITIALIZE Q-TABLE
 # -------------------------------
@@ -62,17 +65,15 @@ def initialize_product(product):
         st.session_state.q_table[product] = np.zeros(len(platforms))
 
 # -------------------------------
-# GET VALID PLATFORMS
+# VALID PLATFORMS
 # -------------------------------
 def get_valid_platforms(product):
-    available = marketplace[product]
-    return [p for p in platforms if available.get(p) is not None]
+    return [p for p in platforms if marketplace[product].get(p) is not None]
 
 # -------------------------------
-# RL ACTION SELECTION (CORE FIX)
+# RL ACTION SELECTION
 # -------------------------------
 def choose_action(product):
-
     initialize_product(product)
 
     valid_platforms = get_valid_platforms(product)
@@ -80,7 +81,6 @@ def choose_action(product):
 
     q_values = st.session_state.q_table[product]
 
-    # Exploration vs Exploitation
     if np.random.rand() < epsilon:
         action_index = np.random.choice(valid_indices)
     else:
@@ -90,7 +90,7 @@ def choose_action(product):
     return platforms[action_index]
 
 # -------------------------------
-# REWARD FUNCTION (UPGRADED)
+# REWARD FUNCTION
 # -------------------------------
 def calculate_reward(product, platform):
 
@@ -99,7 +99,6 @@ def calculate_reward(product, platform):
     price = data["price"]
     rating = data["rating"]
 
-    # Normalize components
     price_score = 10000 / price
     rating_score = rating * 10
     preference_score = st.session_state.user_pref[platform]
@@ -150,25 +149,17 @@ if product in marketplace:
     df = pd.DataFrame(data_rows)
     st.dataframe(df, use_container_width=True)
 
-    # -------------------------------
-    # RL-BASED SUGGESTION
-    # -------------------------------
+    # RL suggestion
     suggested = choose_action(product)
-
     st.success(f"🤖 RL Suggestion: {suggested}")
 
-    # -------------------------------
-    # USER CHOICE
-    # -------------------------------
     valid_platforms = get_valid_platforms(product)
-
     choice = st.selectbox("Where do you want to buy from?", valid_platforms)
 
     if st.button("Confirm Purchase"):
 
         reward = calculate_reward(product, choice)
 
-        # Bonus/Penalty
         if choice == suggested:
             reward += 10
             st.success("You followed the RL suggestion 🎯")
@@ -176,17 +167,37 @@ if product in marketplace:
             reward -= 5
             st.warning("You ignored the suggestion ⚠️")
 
-        # Update preference
         st.session_state.user_pref[choice] += 1
 
-        # Update Q-table
         update_q(product, choice, reward)
+
+        # store reward history
+        st.session_state.reward_history.append(reward)
 
         st.subheader("📊 Updated Q-Table")
         st.write(st.session_state.q_table[product])
 
         st.subheader("👤 User Preferences")
         st.write(st.session_state.user_pref)
+
+    # -------------------------------
+    # 📈 LEARNING GRAPH
+    # -------------------------------
+    if len(st.session_state.reward_history) > 1:
+
+        st.subheader("📈 Learning Progress Over Time")
+
+        rewards = st.session_state.reward_history
+
+        df_rewards = pd.DataFrame({
+            "Step": list(range(1, len(rewards) + 1)),
+            "Reward": rewards
+        })
+
+        # Moving average (smooth curve)
+        df_rewards["Moving Avg (5)"] = df_rewards["Reward"].rolling(window=5).mean()
+
+        st.line_chart(df_rewards.set_index("Step"))
 
 else:
     if product != "":
