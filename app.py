@@ -8,7 +8,7 @@ import pandas as pd
 st.set_page_config(page_title="RL Smart Shopping Assistant", layout="centered")
 
 st.title("🛍️ RL Smart Shopping Assistant")
-st.write("Find the best deal. Let the agent learn your preferences.")
+st.write("AI-powered deal optimization using Reinforcement Learning")
 
 # -------------------------------
 # PLATFORM DATA
@@ -43,40 +43,77 @@ marketplace = {
 # -------------------------------
 learning_rate = 0.1
 discount_factor = 0.9
+epsilon = 0.2  # exploration rate
 
-# Initialize Q-table in session
+# -------------------------------
+# SESSION STATE INIT
+# -------------------------------
 if "q_table" not in st.session_state:
     st.session_state.q_table = {}
 
+if "user_pref" not in st.session_state:
+    st.session_state.user_pref = {p: 0 for p in platforms}
+
 # -------------------------------
-# INITIALIZE PRODUCT STATE
+# INITIALIZE Q-TABLE
 # -------------------------------
 def initialize_product(product):
     if product not in st.session_state.q_table:
         st.session_state.q_table[product] = np.zeros(len(platforms))
 
 # -------------------------------
-# RECOMMEND CHEAPEST PLATFORM
+# GET VALID PLATFORMS
 # -------------------------------
-def recommend(product):
+def get_valid_platforms(product):
+    available = marketplace[product]
+    return [p for p in platforms if available.get(p) is not None]
+
+# -------------------------------
+# RL ACTION SELECTION (CORE FIX)
+# -------------------------------
+def choose_action(product):
 
     initialize_product(product)
 
-    available = marketplace[product]
+    valid_platforms = get_valid_platforms(product)
+    valid_indices = [platforms.index(p) for p in valid_platforms]
 
-    valid_platforms = {
-        p: details for p, details in available.items() if details is not None
-    }
+    q_values = st.session_state.q_table[product]
 
-    cheapest = min(
-        valid_platforms,
-        key=lambda x: valid_platforms[x]["price"]
-    )
+    # Exploration vs Exploitation
+    if np.random.rand() < epsilon:
+        action_index = np.random.choice(valid_indices)
+    else:
+        valid_q = [(i, q_values[i]) for i in valid_indices]
+        action_index = max(valid_q, key=lambda x: x[1])[0]
 
-    return cheapest
+    return platforms[action_index]
 
 # -------------------------------
-# UPDATE Q TABLE
+# REWARD FUNCTION (UPGRADED)
+# -------------------------------
+def calculate_reward(product, platform):
+
+    data = marketplace[product][platform]
+
+    price = data["price"]
+    rating = data["rating"]
+
+    # Normalize components
+    price_score = 10000 / price
+    rating_score = rating * 10
+    preference_score = st.session_state.user_pref[platform]
+
+    reward = (
+        0.6 * price_score +
+        0.3 * rating_score +
+        0.1 * preference_score
+    )
+
+    return reward
+
+# -------------------------------
+# Q-TABLE UPDATE
 # -------------------------------
 def update_q(product, platform, reward):
 
@@ -92,7 +129,7 @@ def update_q(product, platform, reward):
     st.session_state.q_table[product][index] = new_value
 
 # -------------------------------
-# USER INPUT PRODUCT
+# USER INPUT
 # -------------------------------
 product = st.text_input("🔎 Enter product (tshirt / shoes / watch / electronics)").lower()
 
@@ -114,36 +151,42 @@ if product in marketplace:
     st.dataframe(df, use_container_width=True)
 
     # -------------------------------
-    # SMART SUGGESTION
+    # RL-BASED SUGGESTION
     # -------------------------------
-    suggested = recommend(product)
+    suggested = choose_action(product)
 
-    st.success(f"💰 Smart Suggestion (Cheapest): {suggested}")
+    st.success(f"🤖 RL Suggestion: {suggested}")
 
     # -------------------------------
     # USER CHOICE
     # -------------------------------
-    choice = st.selectbox("Where do you want to buy from?", platforms)
+    valid_platforms = get_valid_platforms(product)
+
+    choice = st.selectbox("Where do you want to buy from?", valid_platforms)
 
     if st.button("Confirm Purchase"):
 
-        if marketplace[product][suggested] is not None:
+        reward = calculate_reward(product, choice)
 
-            price = marketplace[product][suggested]["price"]
+        # Bonus/Penalty
+        if choice == suggested:
+            reward += 10
+            st.success("You followed the RL suggestion 🎯")
+        else:
+            reward -= 5
+            st.warning("You ignored the suggestion ⚠️")
 
-            reward = 10000 / price   # cheaper → higher reward
+        # Update preference
+        st.session_state.user_pref[choice] += 1
 
-            if choice == suggested:
-                reward += 10
-                st.success("You accepted the smart suggestion! Bonus reward applied.")
-            else:
-                reward -= 5
-                st.warning("You ignored the suggestion. Penalty applied.")
+        # Update Q-table
+        update_q(product, choice, reward)
 
-            update_q(product, suggested, reward)
+        st.subheader("📊 Updated Q-Table")
+        st.write(st.session_state.q_table[product])
 
-            st.subheader("Updated Q-Table")
-            st.write(st.session_state.q_table[product])
+        st.subheader("👤 User Preferences")
+        st.write(st.session_state.user_pref)
 
 else:
     if product != "":
